@@ -2,65 +2,59 @@ name: API Security Scan
 
 on:
   push:
-    branches: [ "master" ]
+    branches:
+      - main
   pull_request:
-    branches: [ "master" ]
+    branches:
+      - main
 
 jobs:
   zap-api-scan:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Start Application (Staging)
+      - name: Start Application
         run: |
-          docker-compose up -d
-          sleep 20
+          docker compose up -d
 
-      - name: Run OWASP ZAP API Scan
+      - name: Wait for API to be ready
         run: |
-          name: API Security Scan
+          for i in {1..12}; do
+            if curl -s http://localhost:8080/health > /dev/null; then
+              echo "API is up!"
+              break
+            fi
+            echo "Waiting for API..."
+            sleep 5
+          done
 
-          on:
-            push:
-              # this repository's default branch is `master`; include it here
-              branches: [ 'master' ]
-            pull_request:
-              branches: [ 'master' ]
+      - name: Run ZAP API Scan
+        run: |
+          docker run --rm \
+            -v $(pwd):/zap/wrk/:rw \
+            owasp/zap2docker-stable \
+            zap-api-scan.py \
+            -t http://host.docker.internal:8080/v3/api-docs \
+            -f openapi \
+            -r zap_report.html
 
-          jobs:
-            zap-api-scan:
-              runs-on: ubuntu-latest
-              steps:
-                - name: Checkout code
-                  uses: actions/checkout@v3
+      - name: Upload ZAP Report
+        uses: actions/upload-artifact@v3
+        with:
+          name: zap-report
+          path: zap_report.html
 
-                - name: Start Application (Staging)
-                  run: |
-                    docker-compose up -d
-                    sleep 20
+      - name: Fail on High Risk Issues
+        run: |
+          if grep -q "High" zap_report.html; then
+            echo "High risk vulnerabilities found!"
+            exit 1
+          fi
 
-                - name: Run OWASP ZAP API Scan
-                  run: |
-                    docker run --rm \
-                      -v "${{ github.workspace }}:/zap/wrk/:rw" \
-                      owasp/zap2docker-stable \
-                      zap-api-scan.py \
-                      -t http://localhost:8080/v3/api-docs \
-                      -f openapi \
-                      -r zap_report.html
-
-                - name: Upload ZAP Report
-                  uses: actions/upload-artifact@v3
-                  with:
-                    name: zap-report
-                    path: zap_report.html
-
-                - name: Fail pipeline on High risk
-                  run: |
-                    if grep -q "High" zap_report.html; then
-                      echo "High risk vulnerabilities found!"
-                      exit 1
-                    fi
-
+      - name: Stop Application
+        if: always()
+        run: |
+          docker compose down
