@@ -1,68 +1,66 @@
 name: API Security Scan
 
 on:
-push:
-branches: [ "main" ]
-pull_request:
-branches: [ "main" ]
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
 
 jobs:
-zap-api-scan:
-runs-on: ubuntu-latest
+  zap-api-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
 
-```
-steps:
-- name: Checkout Code
-  uses: actions/checkout@v3
+      - name: Start Application (Staging)
+        run: |
+          docker-compose up -d
+          sleep 20
 
-- name: Start Application (Staging)
-  run: |
-    docker-compose up -d
-    sleep 20
+      - name: Run OWASP ZAP API Scan
+        run: |
+          name: API Security Scan
 
-- name: Run OWASP ZAP API Scan
-  run: |
-    name: API Security Scan
+          on:
+            push:
+              # this repository's default branch is `master`; include it here
+              branches: [ 'master' ]
+            pull_request:
+              branches: [ 'master' ]
 
-    on:
-      push:
-        # this repository's default branch is `master`; include it here
-        branches: [ 'master' ]
-      pull_request:
-        branches: [ 'master' ]
+          jobs:
+            zap-api-scan:
+              runs-on: ubuntu-latest
+              steps:
+                - name: Checkout code
+                  uses: actions/checkout@v3
 
-    jobs:
-      zap-api-scan:
-        runs-on: ubuntu-latest
-        steps:
-          - name: Checkout code
-            uses: actions/checkout@v3
+                - name: Start Application (Staging)
+                  run: |
+                    docker-compose up -d
+                    sleep 20
 
-          - name: Start Application (Staging)
-            run: |
-              docker-compose up -d
-              sleep 20
+                - name: Run OWASP ZAP API Scan
+                  run: |
+                    docker run --rm \
+                      -v "${{ github.workspace }}:/zap/wrk/:rw" \
+                      owasp/zap2docker-stable \
+                      zap-api-scan.py \
+                      -t http://localhost:8080/v3/api-docs \
+                      -f openapi \
+                      -r zap_report.html
 
-          - name: Run OWASP ZAP API Scan
-            run: |
-              docker run --rm \
-                -v "${{ github.workspace }}:/zap/wrk/:rw" \
-                owasp/zap2docker-stable \
-                zap-api-scan.py \
-                -t http://localhost:8080/v3/api-docs \
-                -f openapi \
-                -r zap_report.html
+                - name: Upload ZAP Report
+                  uses: actions/upload-artifact@v3
+                  with:
+                    name: zap-report
+                    path: zap_report.html
 
-          - name: Upload ZAP Report
-            uses: actions/upload-artifact@v3
-            with:
-              name: zap-report
-              path: zap_report.html
-
-          - name: Fail pipeline on High risk
-            run: |
-              if grep -q "High" zap_report.html; then
-                echo "High risk vulnerabilities found!"
-                exit 1
-              fi
+                - name: Fail pipeline on High risk
+                  run: |
+                    if grep -q "High" zap_report.html; then
+                      echo "High risk vulnerabilities found!"
+                      exit 1
+                    fi
 
